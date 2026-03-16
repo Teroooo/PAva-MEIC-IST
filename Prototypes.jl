@@ -36,24 +36,67 @@ function has_own_slot(obj::Object, name::Symbol)
 end
 
 function has_slot(obj::Object, name::Symbol)
-    # TODO
+    if has_own_slot(obj, name)
+        return true
+    end
+
+    for parent in get_parents(obj)
+        if has_slot(parent, name)
+            return true
+        end
+    end
+
+    return false
 end
 
 function own_slots(obj::Object)
-    collect(keys(getfield(obj, :slots)))
+    sort(collect(keys(getfield(obj, :slots))))
 end
 
 function get_slot(obj::Object, name::Symbol)
     getfield(obj, :slots)[name]
 end
 
-#= FALTA 
-    julia> point.z
-    3
+# —————————— Custom property get method ——————————
 
-    julia> point.x = 10
-    10
-=#
+function Base.getproperty(obj::Object, name::Symbol)
+    if name === :slots || name === :parents
+        return getfield(obj, name)
+    end
+
+    get_slot(obj, name)
+end
+
+# ———————————— Custom property set method ————————————
+
+function Base.setproperty!(obj::Object, name::Symbol, val)
+    if name === :slots || name === :parents
+        return setfield!(obj, name, val)
+    end
+    
+    set_slot!(obj, name, val)
+end
+
+# ———————————— Custom object show method ————————————
+
+function Base.show(io::IO, ::MIME"text/plain", obj::Object)
+    if obj === lobby
+        print("<lobby>")
+    else
+        id = objectid(obj)
+        slots = own_slots(obj)
+
+        print("<Object $id ")
+        for (i, k) in enumerate(slots)
+            val = get_slot(obj, k)
+            print("$k=$val")
+            if i < length(slots)
+                print(", ")
+            end
+        end
+        print(">")
+    end
+end
 
 #=
 
