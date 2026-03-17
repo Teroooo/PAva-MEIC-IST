@@ -54,7 +54,17 @@ function own_slots(obj::Object)
 end
 
 function get_slot(obj::Object, name::Symbol)
-    getfield(obj, :slots)[name]
+    if has_own_slot(obj, name)
+        return getfield(obj, :slots)[name]
+    end
+
+    for parent in get_parents(obj)
+        if has_slot(parent, name)
+            return get_slot(parent, name)
+        end
+    end
+
+    error("Slot $(name) not found in object or its parents")
 end
 
 # —————————— Custom property get method ——————————
@@ -98,13 +108,46 @@ function Base.show(io::IO, ::MIME"text/plain", obj::Object)
     end
 end
 
-#=
 
 # ————————————————————————————————————————————
 # ————————— 3. Cloning and Delegation ————————
 # ————————————————————————————————————————————
 
-clone(proto; slots...) 
+function clone(proto; slots...)
+    d = Dict{Symbol, Any}()
+
+    for (k, v) in slots
+       d[k] = v
+    end
+
+    Object(d, Object[proto])
+end
+
+function add_parent!(obj, parent)
+    parents = getfield(obj, :parents)
+    if parent in parents
+        return parent
+    end
+    push!(parents, parent)
+    return parent
+end
+
+function remove_parent!(obj, parent)
+    parents = getfield(obj, :parents)
+    idx = findfirst(isequal(parent), parents)
+
+    if idx === nothing
+        error("Parent not found in delegation chain")
+    end
+
+    deleteat!(parents, idx)
+end
+
+function set_parents!(obj, parents...)
+    setfield!(obj, :parents, collect(parents))
+end
+
+#=
 
 
 # ————————————————————————————————————————————
