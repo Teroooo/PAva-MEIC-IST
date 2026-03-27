@@ -9,7 +9,11 @@ mutable struct Object
     parents::Vector{Object}
 end
 
-const lobby = Object(Dict{Symbol, Any}(), Vector{Object}())
+const lobby = Object(Dict{Symbol, Any}(
+    :doesNotUnderstand => (self, msg) -> begin
+        println("ERROR: Object does not understand message ", repr(msg))
+    end
+    ), Vector{Object}())
 
 
 function object(; slots...) 
@@ -64,7 +68,7 @@ function get_slot(obj::Object, name::Symbol)
         end
     end
 
-    error("Slot $(name) not found in object or its parents")
+    return nothing
 end
 
 # —————————— Custom property get method ——————————
@@ -115,7 +119,9 @@ function Base.show(io::IO, ::MIME"text/plain", obj::Object)
             print(", ")
         end
 
-        if val isa String
+        if val isa Object
+            print("$k=<Object $(objectid(val))>")
+        elseif val isa String
             print("$k=\"$(val)\"")
         else
             print("$k=$val")
@@ -180,7 +186,10 @@ end
 
 function send(obj, msg, args...)
     func = get_slot(obj, msg)
-    if func isa Function
+    if func === nothing || msg === :doesNotUnderstand
+        does_not_understand = get_slot(obj, :doesNotUnderstand)
+        return does_not_understand(obj, msg)
+    elseif func isa Function
         return func(obj, args...)
     end
     return func
