@@ -10,9 +10,21 @@ mutable struct Object
 end
 
 const lobby = Object(Dict{Symbol, Any}(
-    :doesNotUnderstand => (self, msg) -> begin
-        println("ERROR: Object does not understand message ", repr(msg))
-    end
+    :doesNotUnderstand => (self, msg) -> println("ERROR: Object does not understand message ", repr(msg)),
+    :clone => (self) -> clone(self),
+    :isA => (self, proto) -> begin
+        if self === proto
+            return true
+        end
+
+        for parent in get_parents(self)
+            if send(parent, :isA, proto)
+                return true
+            end
+        end
+        return false
+    end,
+    :respondsTo => (self, slot) -> has_slot(self, slot)
     ), Vector{Object}())
 
 
@@ -196,19 +208,6 @@ function send(obj, msg, args...)
 end
 
 #=
-
-# ————————————————————————————————————————————
-# —————————— 5. Does Not Understand ——————————
-# ————————————————————————————————————————————
-
-get_slot(obj, name), set_slot!(obj, name, value)
-
-
-# ————————————————————————————————————————————
-# ———————————— 6. Lobby Defaults —————————————
-# ————————————————————————————————————————————
-
-has_slot(obj, name), has_own_slot(obj, name)
 
 # ————————————————————————————————————————————
 # ———— 7. Control Structures as Messages —————
