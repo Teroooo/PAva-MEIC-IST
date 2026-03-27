@@ -16,7 +16,7 @@ function object(; slots...)
     d = Dict{Symbol, Any}()
 
     for (k, v) in slots
-       d[k] = v
+        d[k] = v
     end
 
     Object(d, Object[lobby])
@@ -92,20 +92,47 @@ end
 function Base.show(io::IO, ::MIME"text/plain", obj::Object)
     if obj === lobby
         print("<lobby>")
-    else
-        id = objectid(obj)
-        slots = own_slots(obj)
-
-        print("<Object $id ")
-        for (i, k) in enumerate(slots)
-            val = get_slot(obj, k)
-            print("$k=$val")
-            if i < length(slots)
-                print(", ")
-            end
-        end
-        print(">")
+        return
     end
+
+    id = objectid(obj)
+    slots = own_slots(obj)
+
+    print("<Object $id ")
+
+    first = true
+    methods = []
+
+    for k in slots
+        val = get_slot(obj, k)
+        # Skip functions
+        if val isa Function
+            push!(methods, k)
+            continue
+        end
+
+        if !first
+            print(", ")
+        end
+
+        if val isa String
+            print("$k=\"$(val)\"")
+        else
+            print("$k=$val")
+        end
+
+        first = false
+    end
+
+    # Print methods separately
+    if !isempty(methods)
+        if !first
+            print(", ")
+        end
+        print("methods=[", join(string.(methods), ", "), "]")
+    end
+
+    print(">")
 end
 
 
@@ -147,15 +174,19 @@ function set_parents!(obj, parents...)
     setfield!(obj, :parents, collect(parents))
 end
 
-#=
-
-
 # ————————————————————————————————————————————
 # ———————————— 4. Message Passing ————————————
 # ————————————————————————————————————————————
 
-send(obj, msg, args...) 
+function send(obj, msg, args...)
+    func = get_slot(obj, msg)
+    if func isa Function
+        return func(obj, args...)
+    end
+    return func
+end
 
+#=
 
 # ————————————————————————————————————————————
 # —————————— 5. Does Not Understand ——————————
