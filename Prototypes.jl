@@ -36,10 +36,6 @@ function object(; slots...)
     Object(d, Object[lobby])
 end
 
-function object_from_dict(dict::Dict{Symbol,Any})
-    object(; dict...)
-end
-
 function get_parents(obj::Object)
     getfield(obj, :parents)
 end
@@ -220,22 +216,26 @@ end
 # ———— 7. Control Structures as Messages —————
 # ————————————————————————————————————————————
 
-true_obj = object(
-    ifTrue=(self, block) -> block(),
-    ifFalse=(self, block) -> nothing,
-    ifTrueIfFalse=(self, trueBlock, falseBlock) -> trueBlock(),
-    not=(self) -> false_obj,
-    and=(self, block) -> block,
-    or=(self, block) -> self
+true_obj = object(;
+    Dict{Symbol,Any}(
+        :ifTrue => (self, block) -> block(),
+        :ifFalse => (self, block) -> nothing,
+        :ifTrueIfFalse => (self, trueBlock, falseBlock) -> trueBlock(),
+        :not => (self) -> false_obj,
+        :and => (self, block) -> block,
+        :or => (self, block) -> self
+    )...
 )
 
-false_obj = object(
-    ifTrue=(self, block) -> nothing,
-    ifFalse=(self, block) -> block(),
-    ifTrueIfFalse=(self, trueBlock, falseBlock) -> falseBlock(),
-    not=(self) -> true_obj,
-    and=(self, block) -> self,
-    or=(self, block) -> block
+false_obj = object(;
+    Dict{Symbol,Any}(
+        :ifTrue => (self, block) -> nothing,
+        :ifFalse => (self, block) -> block(),
+        :ifTrueIfFalse => (self, trueBlock, falseBlock) -> falseBlock(),
+        :not => (self) -> true_obj,
+        :and => (self, block) -> self,
+        :or => (self, block) -> block
+    )...
 )
 
 function bool_object(b::Bool)
@@ -243,7 +243,7 @@ function bool_object(b::Bool)
 end
 
 function block_object(f::Function)
-    return object_from_dict(
+    return object(;
         Dict{Symbol,Any}(
             :value => (self, args...) -> f(args...),
             :whileTrue => (self, block) -> begin
@@ -260,12 +260,12 @@ function block_object(f::Function)
                     send(self, :whileFalse, block)
                 end)
             end
-        )
+        )...
     )
 end
 
 function range_object(r::AbstractRange)
-    return object_from_dict(
+    return object(;
         Dict{Symbol,Any}(
             :do => (self, block) -> begin
                 start = first(r)
@@ -301,12 +301,12 @@ function range_object(r::AbstractRange)
                 acc
             end,
             :by => (self, step) -> range_object(first(r):step:last(r))
-        )
+        )...
     )
 end
 
 function number_object(n::Number)
-    return object_from_dict(
+    return object(;
         Dict{Symbol,Any}(
             :to => (self, range) -> range_object(n:range),
             :do => (self, block) -> send(send(0, :to, n - 1), :do, block),
@@ -317,7 +317,7 @@ function number_object(n::Number)
                         send(n - 1, :timesRepeat, block)
                     end, () -> nothing)
             end
-        )
+        )...
     )
 end
 
@@ -335,33 +335,50 @@ function to_object(x)
     end
 end
 
-#=
-
 # ————————————————————————————————————————————
 # ———————————————— 8. Become —————————————————
 # ————————————————————————————————————————————
 
-get_parents(obj), add_parent!(obj, parent), remove_parent!(obj, parent),
+function become!(a, b)
+    a === b && return nothing
+
+    a_slots = getfield(a, :slots)
+    b_slots = getfield(b, :slots)
+    setfield!(a, :slots, b_slots)
+    setfield!(b, :slots, a_slots)
+
+    a_parents = getfield(a, :parents)
+    b_parents = getfield(b, :parents)
+    setfield!(a, :parents, b_parents)
+    setfield!(b, :parents, a_parents)
+
+    return nothing
+end
+
+#=
 
 # ————————————————————————————————————————————
 # ———————————————— 9. Traits —————————————————
 # ————————————————————————————————————————————
 
-set_parents!(obj, parents...) 
+function trait(; methods...)
+    
+end
+
+function compose_traits(traits...; resolve)
+    
+end
+
+function use_trait!(obj, trait)
+    
+end
 
 # ————————————————————————————————————————————
-# —————— 10. Dynamic Object Evolution ————————
+# ——————— 12. Smalltalk-Style Syntax —————————
 # ————————————————————————————————————————————
 
-become!(a, b)
+macro send(expr...)
 
-
-trait(; methods...), compose_traits(traits...; resolve),
-
-
-use_trait!(obj, trait)
-
-
-to_object(x)
+end
 
 =#
