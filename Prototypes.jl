@@ -1,41 +1,43 @@
-
-
 # ————————————————————————————————————————————
 # ——————————— 2. Objects and Slots ———————————
 # ————————————————————————————————————————————
 
-mutable struct Object 
-    slots::Dict{Symbol, Any}
+mutable struct Object
+    slots::Dict{Symbol,Any}
     parents::Vector{Object}
 end
 
-const lobby = Object(Dict{Symbol, Any}(
-    :doesNotUnderstand => (self, msg) -> println("ERROR: Object does not understand message ", repr(msg)),
-    :clone => (self) -> clone(self),
-    :isA => (self, proto) -> begin
-        if self === proto
-            return true
-        end
-
-        for parent in get_parents(self)
-            if send(parent, :isA, proto)
+const lobby = Object(Dict{Symbol,Any}(
+        :doesNotUnderstand => (self, msg) -> println("ERROR: Object does not understand message ", repr(msg)),
+        :clone => (self) -> clone(self),
+        :isA => (self, proto) -> begin
+            if self === proto
                 return true
             end
-        end
-        return false
-    end,
-    :respondsTo => (self, slot) -> has_slot(self, slot)
+
+            for parent in get_parents(self)
+                if send(parent, :isA, proto)
+                    return true
+                end
+            end
+            return false
+        end,
+        :respondsTo => (self, slot) -> has_slot(self, slot)
     ), Vector{Object}())
 
 
-function object(; slots...) 
-    d = Dict{Symbol, Any}()
+function object(; slots...)
+    d = Dict{Symbol,Any}()
 
     for (k, v) in slots
         d[k] = v
     end
 
     Object(d, Object[lobby])
+end
+
+function object_from_dict(dict::Dict{Symbol,Any})
+    object(; dict...)
 end
 
 function get_parents(obj::Object)
@@ -99,7 +101,7 @@ function Base.setproperty!(obj::Object, name::Symbol, val)
     if name === :slots || name === :parents
         return setfield!(obj, name, val)
     end
-    
+
     set_slot!(obj, name, val)
 end
 
@@ -108,6 +110,12 @@ end
 function Base.show(io::IO, ::MIME"text/plain", obj::Object)
     if obj === lobby
         print("<lobby>")
+        return
+    elseif obj === true_obj
+        print(true)
+        return
+    elseif obj === false_obj
+        print(false)
         return
     end
 
@@ -159,10 +167,10 @@ end
 # ————————————————————————————————————————————
 
 function clone(proto; slots...)
-    d = Dict{Symbol, Any}()
+    d = Dict{Symbol,Any}()
 
     for (k, v) in slots
-       d[k] = v
+        d[k] = v
     end
 
     Object(d, Object[proto])
@@ -197,23 +205,137 @@ end
 # ————————————————————————————————————————————
 
 function send(obj, msg, args...)
-    func = get_slot(obj, msg)
+    proto = to_object(obj)
+    func = get_slot(proto, msg)
     if func === nothing || msg === :doesNotUnderstand
-        does_not_understand = get_slot(obj, :doesNotUnderstand)
-        return does_not_understand(obj, msg)
+        does_not_understand = get_slot(proto, :doesNotUnderstand)
+        return does_not_understand(proto, msg)
     elseif func isa Function
-        return func(obj, args...)
+        return func(proto, args...)
     end
     return func
 end
-
-#=
 
 # ————————————————————————————————————————————
 # ———— 7. Control Structures as Messages —————
 # ————————————————————————————————————————————
 
-own_slots(obj) 
+true_obj = object(
+    ifTrue=(self, block) -> block(),
+    ifFalse=(self, block) -> nothing,
+    ifTrueIfFalse=(self, trueBlock, falseBlock) -> trueBlock(),
+    not=(self) -> false_obj,
+    and=(self, block) -> block,
+    or=(self, block) -> self
+)
+
+false_obj = object(
+    ifTrue=(self, block) -> nothing,
+    ifFalse=(self, block) -> block(),
+    ifTrueIfFalse=(self, trueBlock, falseBlock) -> falseBlock(),
+    not=(self) -> true_obj,
+    and=(self, block) -> self,
+    or=(self, block) -> block
+)
+
+function bool_object(b::Bool)
+    return b ? true_obj : false_obj
+end
+
+function block_object(f::Function)
+    return object_from_dict(
+        Dict{Symbol,Any}(
+            :value => (self, args...) -> f(args...),
+            :whileTrue => (self, block) -> begin
+                cond = send(self, :value)
+                send(cond, :ifTrueIfFalse, () -> begin
+                        send(block, :value)
+                        send(self, :whileTrue, block)
+                    end, () -> nothing)
+            end,
+            :whileFalse => (self, block) -> begin
+                cond = send(self, :value)
+                send(cond, :ifTrueIfFalse, () -> nothing, () -> begin
+                    send(block, :value)
+                    send(self, :whileFalse, block)
+                end)
+            end
+        )
+    )
+end
+
+function range_object(r::AbstractRange)
+    return object_from_dict(
+        Dict{Symbol,Any}(
+            :do => (self, block) -> begin
+                start = first(r)
+                s = step(r)
+                stop = last(r)
+
+                cond = send((x, y) -> (x <= y), :value, start, stop)
+                send(cond, :ifTrueIfFalse, () -> begin
+                        send(block, :value, start)
+                        send((start+s):s:stop, :do, block)
+                    end, () -> nothing)
+            end,
+            :collect => (self) -> begin
+                result = []
+                send(self, :do, (i) -> begin
+                    push!(result, i)
+                end)
+                result
+            end,
+            :select => (self, block) -> begin
+                selected = []
+                send(self, :do, (i) -> begin
+                    cond = send(block, :value, i)
+                    send(cond, :ifTrueIfFalse, () -> push!(selected, i), () -> nothing)
+                end)
+                selected
+            end,
+            :injectInto => (self, value, op) -> begin
+                acc = value
+                send(self, :do, (i) -> begin
+                    acc = op(acc, i)
+                end)
+                acc
+            end,
+            :by => (self, step) -> range_object(first(r):step:last(r))
+        )
+    )
+end
+
+function number_object(n::Number)
+    return object_from_dict(
+        Dict{Symbol,Any}(
+            :to => (self, range) -> range_object(n:range),
+            :do => (self, block) -> send(send(0, :to, n - 1), :do, block),
+            :timesRepeat => (self, block) -> begin
+                cond = send((x) -> (x > 0), :value, n)
+                send(cond, :ifTrueIfFalse, () -> begin
+                        send(block, :value)
+                        send(n - 1, :timesRepeat, block)
+                    end, () -> nothing)
+            end
+        )
+    )
+end
+
+function to_object(x)
+    if x isa Object
+        return x
+    elseif x isa Bool
+        return bool_object(x)
+    elseif x isa Function
+        return block_object(x)
+    elseif x isa AbstractRange
+        return range_object(x)
+    elseif x isa Number
+        return number_object(x)
+    end
+end
+
+#=
 
 # ————————————————————————————————————————————
 # ———————————————— 8. Become —————————————————
