@@ -339,7 +339,9 @@ end
 # ————————————————————————————————————————————
 
 function become!(a, b)
-    a === b && return nothing
+    if a === b
+        return nothing
+    end
 
     a_slots = getfield(a, :slots)
     b_slots = getfield(b, :slots)
