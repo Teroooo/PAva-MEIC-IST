@@ -77,7 +77,6 @@ function get_slot(obj::Object, name::Symbol)
             return get_slot(parent, name)
         end
     end
-
     return nothing
 end
 
@@ -355,30 +354,139 @@ function become!(a, b)
     return nothing
 end
 
-#=
 
 # ————————————————————————————————————————————
 # ———————————————— 9. Traits —————————————————
 # ————————————————————————————————————————————
 
 function trait(; methods...)
-    
+    object(; methods...)
 end
 
 function compose_traits(traits...; resolve)
+    dicts = map(trait -> getfield(trait, :slots), traits)
+    dicts = merge(dicts...)
+    for (k, v) in resolve 
+        dicts[k] = v
+    end
     
+    obj = object(;)
+    setfield!(obj, :slots, dicts)
+    obj
+end
+
+function compose_traits(traits...;)
+    set = Dict{Symbol,Any}()
+    for trait in traits
+        for (k, v) in getfield(trait, :slots)
+            if k ∉ keys(set)
+                set[k] = v
+            else
+                println("ERROR: Trait conflict on: $k")   
+                return
+            end
+        end
+    end
 end
 
 function use_trait!(obj, trait)
-    
+    for (k, v) in getfield(trait, :slots)
+        set_slot!(obj, k, v)
+    end
 end
+
+
 
 # ————————————————————————————————————————————
 # ——————— 12. Smalltalk-Style Syntax —————————
 # ————————————————————————————————————————————
+# ── 1. Reconhecer bloco literal ───────────────────────────────────────────────
+is_block_expr(ex) = ex isa Expr && ex.head in (:vect, :vcat)
 
-macro send(expr...)
+# Encontra o | separador na árvore e devolve (param, corpo_recuperado)
+function find_pipe_separator(ex)
+    ex isa Expr || return nothing
+    pipe = Symbol("|")
 
+    # Encontrámos o pipe: arg esq = parâmetro, arg dir = corpo
+    if ex.head === :call && length(ex.args) == 3 && ex.args[1] === pipe
+        return (ex.args[2], ex.args[3])
+    end
+
+    # Pesquisa recursiva (salta args[1] em :call — é o nome da função)
+    start = ex.head === :call ? 2 : 1
+    for i in start:length(ex.args)
+        result = find_pipe_separator(ex.args[i])
+        if result !== nothing
+            param, replacement = result
+            new_args = copy(ex.args)
+            new_args[i] = replacement          # substitui o nó | pelo seu rhs
+            return (param, Expr(ex.head, new_args...))
+        end
+    end
+    return nothing
 end
 
-=#
+function parse_block_expr(ex::Expr)
+    # [s1; s2] → () -> begin s1; s2 end
+    if ex.head === :vcat
+        return Expr(:->, Expr(:tuple), Expr(:block, ex.args...))
+    end
+
+    args = ex.args
+    isempty(args) && return :((() -> nothing))
+
+    # Procura | em qualquer profundidade no último argumento
+    result = find_pipe_separator(args[end])
+    if result !== nothing
+        last_param, body = result
+        params = Any[args[1:end-1]..., last_param]
+        lhs = length(params) == 1 ? params[1] : Expr(:tuple, params...)
+        return Expr(:->, lhs, body)
+    else
+        body = length(args) == 1 ? args[1] : Expr(:block, args...)
+        return Expr(:->, Expr(:tuple), body)
+    end
+end
+
+# ── 3. Concatenação camelCase de keywords ─────────────────────────────────────
+camel_concat(kws::Vector{String}) =
+    foldl((a, b) -> a * uppercasefirst(b), kws)
+
+# ── 4. O macro ────────────────────────────────────────────────────────────────
+macro send(receiver, rest...)
+    # O receiver pode ser ele próprio um bloco literal
+    recv = is_block_expr(receiver) ? parse_block_expr(receiver) : receiver
+
+    isempty(rest) && error("@send: falta a mensagem")
+    first_tok = rest[1]
+
+    if first_tok isa QuoteNode && first_tok.value isa Symbol
+        # ── Mensagem keyword (uma ou mais) ──────────────────────────
+        # Varre alternadamente: :keyword  arg arg ... :keyword  arg ...
+        kws   = String[]
+        margs = []
+        i = 1
+        while i <= length(rest)
+            tok = rest[i]
+            tok isa QuoteNode && tok.value isa Symbol || break
+            push!(kws, string(tok.value))
+            i += 1
+            while i <= length(rest) &&
+                    !(rest[i] isa QuoteNode && rest[i].value isa Symbol)
+                arg = rest[i]
+                push!(margs, is_block_expr(arg) ? parse_block_expr(arg) : arg)
+                i += 1
+            end
+        end
+        msg = QuoteNode(Symbol(camel_concat(kws)))
+        return esc(:(send($recv, $msg, $(margs...))))
+
+    elseif first_tok isa Symbol
+        # ── Mensagem unária ─────────────────────────────────────────
+        return esc(:(send($recv, $(QuoteNode(first_tok)))))
+
+    else
+        error("@send: esperado nome de mensagem (símbolo ou :keyword), recebi $first_tok")
+    end
+end
