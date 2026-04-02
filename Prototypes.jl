@@ -382,6 +382,7 @@ function compose_traits(traits...;)
             end
         end
     end
+    println("No Trait conflicts")
 end
 
 function use_trait!(obj, trait)
@@ -397,17 +398,14 @@ end
 # ── 1. Reconhecer bloco literal ───────────────────────────────────────────────
 is_block_expr(ex) = ex isa Expr && ex.head in (:vect, :vcat)
 
-# Encontra o | separador na árvore e devolve (param, corpo_recuperado)
 function find_pipe_separator(ex)
     ex isa Expr || return nothing
     pipe = Symbol("|")
 
-    # Encontrámos o pipe: arg esq = parâmetro, arg dir = corpo
     if ex.head === :call && length(ex.args) == 3 && ex.args[1] === pipe
         return (ex.args[2], ex.args[3])
     end
 
-    # Pesquisa recursiva (salta args[1] em :call — é o nome da função)
     start = ex.head === :call ? 2 : 1
     for i in start:length(ex.args)
         result = find_pipe_separator(ex.args[i])
@@ -422,7 +420,6 @@ function find_pipe_separator(ex)
 end
 
 function parse_block_expr(ex::Expr)
-    # [s1; s2] → () -> begin s1; s2 end
     if ex.head === :vcat
         return Expr(:->, Expr(:tuple), Expr(:block, ex.args...))
     end
@@ -430,7 +427,6 @@ function parse_block_expr(ex::Expr)
     args = ex.args
     isempty(args) && return :((() -> nothing))
 
-    # Procura | em qualquer profundidade no último argumento
     result = find_pipe_separator(args[end])
     if result !== nothing
         last_param, body = result
@@ -443,11 +439,9 @@ function parse_block_expr(ex::Expr)
     end
 end
 
-# ── 3. Concatenação camelCase de keywords ─────────────────────────────────────
 camel_concat(kws::Vector{String}) =
     foldl((a, b) -> a * uppercasefirst(b), kws)
 
-# ── 4. O macro ────────────────────────────────────────────────────────────────
 macro send(receiver, rest...)
     # O receiver pode ser ele próprio um bloco literal
     recv = is_block_expr(receiver) ? parse_block_expr(receiver) : receiver
